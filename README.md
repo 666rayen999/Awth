@@ -11,6 +11,8 @@
 - Blazingly FAST
 
 ### Goals (TODO)
+- [ ] CreatedAt + UpdatedAt
+- [ ] Sorting (using my blazingly fast heap_sort crate)
 - [ ] Add Post/Get functionality (axum)
 - [ ] JWT Authentication
 - [ ] Relations between collections
