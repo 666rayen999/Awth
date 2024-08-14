@@ -1,5 +1,4 @@
-use awth::collection;
-use chrono::Utc;
+use awth::{collection, Collection, Optimize};
 // #[derive(Clone, Encode, Serialize)]
 // struct UsersSer {
 //     data: Vec<UserSer>,
@@ -70,100 +69,46 @@ collection!(Users, User, {
     hashed_password: u128,
 }, [posts(post_ids): Posts], "test/userz.db");
 
-struct Database {
-    users: Users,
-    posts: Posts,
-}
+#[tokio::main]
+async fn main() {
+    let posts = Posts::load().await.unwrap_or_default();
+    // posts.add(Post::new(1, "1 bobaha".into()));
+    // posts.add(Post::new(2, "2 ghaly".into()));
+    // posts.add(Post::new(3, "3 khal".into()));
+    // posts.add(Post::new(4, "4 mad3ak".into()));
+    // posts.add(Post::new(5, "5 obk".into()));
 
-fn main() {
-    let mut posts = Posts {
-        data: vec![
-            Post {
-                id: 1,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                caption: "1 bobaha".into(),
-            },
-            Post {
-                id: 2,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                caption: "2 ghaly".into(),
-            },
-            Post {
-                id: 3,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                caption: "3 khal".into(),
-            },
-            Post {
-                id: 4,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                caption: "4 mad3ak".into(),
-            },
-            Post {
-                id: 5,
-                created_at: Utc::now(),
-                updated_at: Utc::now(),
-                caption: "5 obk".into(),
-            },
-        ],
-    };
-
-    let users = Users::new(vec![
-        User::new(
-            1,
-            "noice".into(),
-            "hehe@gmail.com".into(),
-            123,
-            &vec![1, 3],
-            &posts,
-        ),
-        User::new(
-            2,
-            "rayen".into(),
-            "rayen@gmail.com".into(),
-            12345,
-            &vec![2],
-            &posts,
-        ),
-    ]);
-
-    // users.data.iter_mut().for_each(|user| {
-    //     let ids = user.post_ids.clone();
-    //     ids.iter()
-    //         .for_each(|id| user.posts.push(Pointer::new(&posts.get(*id).unwrap())))
-    // });
-
-    users.iter().map(|u| &u.posts).for_each(|ps| {
-        ps.iter()
-            .for_each(|p| println!("{:?}", p.get().unwrap().caption))
-    });
-
-    users.iter().map(|u| &u.posts).for_each(|ps| {
-        ps.iter()
-            .for_each(|p| println!("{:?}", p.get().unwrap().caption))
-    });
-
-    // let users = Users::fast(
-    //     UsersSer {
-    //         data: vec![
-    //             UserSer {
-    //                 id: 1,
-    //                 username: "noice".into(),
-    //                 password: "123".into(),
-    //                 posts: vec![1, 3, 4],
-    //             },
-    //             UserSer {
-    //                 id: 2,
-    //                 username: "nmrood".into(),
-    //                 password: "RRRrrr".into(),
-    //                 posts: vec![2, 5],
-    //             },
-    //         ],
-    //     },
+    let mut users = Users::load().await.unwrap_or_default();
+    users
+        .iter_mut()
+        .for_each(|user| user.posts.optimize(&user.post_ids, &posts.data));
+    // users.add(User::new(
+    //     1,
+    //     "noice".into(),
+    //     "hehe@gmail.com".into(),
+    //     123,
+    //     &vec![1, 3, 4],
     //     &posts,
-    // );
-    // println!("{:#?}", users);
+    // ));
+    // users.add(User::new(
+    //     2,
+    //     "rayen".into(),
+    //     "rayen@gmail.com".into(),
+    //     12345,
+    //     &vec![2],
+    //     &posts,
+    // ));
+
+    println!("{:#?}", posts);
+    println!("{:#?}", users);
+
+    println!("=========================");
+    users.iter().map(|u| &u.posts).for_each(|ps| {
+        ps.iter()
+            .filter_map(|p| p.get())
+            .for_each(|p| println!("{:?}", p.caption));
+    });
+
+    // users.save().await.unwrap();
+    // posts.save().await.unwrap();
 }

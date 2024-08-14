@@ -8,22 +8,35 @@ use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
 };
 
+#[derive(Copy, Clone, Debug)]
 pub struct Pointer<T: Sized>(Option<NonNull<T>>);
 
-impl<T: Sized> Pointer<T> {
+impl<T: Document> Pointer<T> {
     pub fn new(reference: Option<&T>) -> Self {
         match reference {
-            Some(val) => Self(Some(val.into())),
+            Some(val) => match val.id() {
+                0 => Self(None),
+                _ => Self(Some(val.into())),
+            },
             None => Self(None),
         }
     }
     pub fn get(&self) -> Option<&T> {
         match self.0 {
-            Some(v) => Some(unsafe { v.as_ref() }),
+            Some(v) => {
+                let v = unsafe { v.as_ref() };
+                match v.id() {
+                    0 => None,
+                    _ => Some(v),
+                }
+            }
             None => None,
         }
     }
 }
+
+unsafe impl<T: Document> Send for Pointer<T> {}
+unsafe impl<T: Document> Sync for Pointer<T> {}
 
 #[derive(Error, Debug)]
 pub enum CollectionError {
@@ -37,6 +50,9 @@ pub enum CollectionError {
 pub trait Collection: Serialize + DeserializeOwned + Default {
     const PATH: &'static str;
     type TYPE;
+
+    fn changed(&self) -> bool;
+    fn filter(&self) -> Self;
 
     async fn load() -> Result<Self, CollectionError>
     where
@@ -53,7 +69,11 @@ pub trait Collection: Serialize + DeserializeOwned + Default {
     where
         Self: Sized,
     {
-        let encoded_data = serialize(self)?;
+        let encoded_data = if self.changed() {
+            serialize(&self.filter())?
+        } else {
+            serialize(self)?
+        };
         let mut file = File::create(Self::PATH).await?;
         file.write_all(&encoded_data).await?;
         Ok(())
@@ -79,7 +99,7 @@ impl<T: Document> Optimize<T> for Vec<Pointer<T>> {
 #[macro_export]
 macro_rules! collection {
     ($collection: ident, $name:ident, { $($field_name:ident : $field_type:ty),* $(,)? }, [ $($relation_name:ident($relation_name_id:ident) : $relation_type:ty),* $(,)? ], $path:expr) => {
-        #[derive(serde::Serialize, serde::Deserialize)]
+        #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
         pub struct $name {
             pub id: u128,
             #[serde(with = "chrono::serde::ts_seconds")]
@@ -96,7 +116,7 @@ macro_rules! collection {
         impl $name {
             pub fn new(id: u128, $( $field_name: $field_type , )* $( $relation_name_id: &Vec<u128> , )* $( $relation_name: &$relation_type , )*) -> Self {
                 let mut ret = Self {
-                    id: 1,
+                    id,
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                     $( $field_name , )*
@@ -120,34 +140,34 @@ macro_rules! collection {
                 self.id
             }
         }
-        #[derive(serde::Serialize, serde::Deserialize, Default)]
+        #[derive(serde::Serialize, serde::Deserialize, Clone, Default, Debug)]
         pub struct $collection {
-            data: Vec<$name>
+            data: Vec<$name>,
+            changed: bool
         }
         impl $collection {
             pub const fn new(data: Vec<$name>) -> Self {
-                Self { data }
+                Self { data, changed: false }
             }
             pub fn add(&mut self, data: $name) {
                 if data.id == 0 { return; }
                 if !self.data.iter().any(|d| d.id == data.id) {
-                    if let Some(d) = self.data.iter_mut().filter(|d| d.id == 0).next() {
-                        *d = data;
-                    } else {
-                        self.data.push(data);
-                    }
+                    self.data.push(data);
+                    self.changed = true;
                 }
             }
             pub fn update(&mut self, data: $name) {
                 if data.id == 0 { return; }
                 if let Some(d) = self.data.iter_mut().filter(|d| d.id == data.id).next() {
                     *d = data;
+                    self.changed = true;
                 }
             }
             pub fn remove(&mut self, id: u128) {
                 if id == 0 { return; }
                 if let Some(d) = self.data.iter_mut().filter(|d| d.id == id).next() {
                     d.id = 0;
+                    self.changed = true;
                 }
             }
             pub fn get(&self, id: u128) -> Option<&$name> {
@@ -163,10 +183,21 @@ macro_rules! collection {
         impl awth::Collection for $collection {
             const PATH: &'static str = $path;
             type TYPE = $name;
+            fn changed(&self) -> bool {
+                self.changed
+            }
+            fn filter(&self) -> Self {
+                Self {
+                    data: self.data.clone().into_iter()
+                            .filter(|data| data.id != 0)
+                            .collect::<Vec<_>>(),
+                    changed: false,
+                }
+            }
         }
     };
     ($collection: ident, $name:ident, { $($field_name:ident : $field_type:ty),* $(,)? }, $path:expr) => {
-        #[derive(serde::Serialize, serde::Deserialize)]
+        #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
         pub struct $name {
             pub id: u128,
             #[serde(with = "chrono::serde::ts_seconds")]
@@ -178,38 +209,41 @@ macro_rules! collection {
         impl $name {
             pub fn new(id: u128, $( $field_name: $field_type, )*) -> Self {
                 Self {
-                    id: 1,
+                    id,
                     created_at: chrono::Utc::now(),
                     updated_at: chrono::Utc::now(),
                     $( $field_name , )*
                 }
             }
         }
-        #[derive(serde::Serialize, serde::Deserialize, Default)]
+        #[derive(serde::Serialize, serde::Deserialize, Clone, Default, Debug)]
         pub struct $collection {
-            data: Vec<$name>
+            data: Vec<$name>,
+            changed: bool
         }
         impl $collection {
+            pub const fn new(data: Vec<$name>) -> Self {
+                Self { data, changed: false }
+            }
             pub fn add(&mut self, data: $name) {
                 if data.id == 0 { return; }
                 if !self.data.iter().any(|d| d.id == data.id) {
-                    if let Some(d) = self.data.iter_mut().filter(|d| d.id == 0).next() {
-                        *d = data;
-                    } else {
-                        self.data.push(data);
-                    }
+                    self.data.push(data);
+                    self.changed = true;
                 }
             }
             pub fn update(&mut self, data: $name) {
                 if data.id == 0 { return; }
                 if let Some(d) = self.data.iter_mut().filter(|d| d.id == data.id).next() {
                     *d = data;
+                    self.changed = true;
                 }
             }
             pub fn remove(&mut self, id: u128) {
                 if id == 0 { return; }
                 if let Some(d) = self.data.iter_mut().filter(|d| d.id == id).next() {
                     d.id = 0;
+                    self.changed = true;
                 }
             }
             pub fn get(&self, id: u128) -> Option<&$name> {
@@ -222,9 +256,25 @@ macro_rules! collection {
                 self.data.iter_mut()
             }
         }
+        impl awth::Document for $name {
+            fn id(&self) -> u128 {
+                self.id
+            }
+        }
         impl awth::Collection for $collection {
             const PATH: &'static str = $path;
             type TYPE = $name;
+            fn changed(&self) -> bool {
+                self.changed
+            }
+            fn filter(&self) -> Self {
+                Self {
+                    data: self.data.clone().into_iter()
+                            .filter(|data| data.id != 0)
+                            .collect::<Vec<_>>(),
+                    changed: false,
+                }
+            }
         }
     };
 }
