@@ -8,6 +8,7 @@ async-trait = "0.1.81"
 axum = "0.7.5"
 bitcode = { version = "0.6.3", features = ["serde"] }
 chrono = { version = "0.4.38", features = ["serde"] }
+lazy_static = "1.5.0"
 serde = { version = "1.0.204", features = ["derive"] }
 thiserror = "1.0.63"
 tokio = { version = "1.39.2", features = ["full"] }

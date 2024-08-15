@@ -54,6 +54,10 @@ pub trait Collection: Serialize + DeserializeOwned + Default {
     fn changed(&self) -> bool;
     fn filter(&self) -> Self;
 
+    fn get_ref(&self) -> &Self {
+        self
+    }
+
     async fn load() -> Result<Self, CollectionError>
     where
         Self: Sized,
@@ -63,6 +67,13 @@ pub trait Collection: Serialize + DeserializeOwned + Default {
         file.read_to_end(&mut encoded_data).await?;
         let data = deserialize(&encoded_data)?;
         Ok(data)
+    }
+
+    async fn reload(&mut self)
+    where
+        Self: Sized,
+    {
+        *self = Self::load().await.unwrap_or_default();
     }
 
     async fn save(&self) -> Result<(), CollectionError>
@@ -80,21 +91,22 @@ pub trait Collection: Serialize + DeserializeOwned + Default {
     }
 }
 
-pub trait Document: Sized {
+pub trait Document: Sized + Send {
     fn id(&self) -> u128;
 }
 
-pub trait Optimize<T: Document> {
-    fn optimize(&mut self, ids: &Vec<u128>, values: &Vec<T>);
-}
+// pub trait Optimize<T: Document> {
+//     fn optimize(&mut self, ids: &Vec<u128>, values: &Vec<T>);
+// }
 
-impl<T: Document> Optimize<T> for Vec<Pointer<T>> {
-    fn optimize(&mut self, ids: &Vec<u128>, values: &Vec<T>) {
-        self.iter_mut().zip(ids.iter()).for_each(|(value, id)| {
-            *value = Pointer::new(values.iter().find(|v| v.id() == *id));
-        });
-    }
-}
+// impl<T: Document + std::fmt::Debug> Optimize<T> for Vec<Pointer<T>> {
+//     fn optimize(&mut self, ids: &Vec<u128>, values: &Vec<T>) {
+//         self.iter_mut().zip(ids.iter()).for_each(|(value, id)| {
+//             *value = Pointer::new(values.iter().find(|v| v.id() == *id));
+//             println!("=== {:?}", value);
+//         });
+//     }
+// }
 
 #[macro_export]
 macro_rules! collection {
@@ -134,6 +146,15 @@ macro_rules! collection {
                 )*
                 ret
             }
+            pub fn optimize(&mut self, $( $relation_name: &$relation_type, )*) {
+                $(
+                    self.$relation_name_id
+                        .iter()
+                        .for_each(|&id| {
+                            self.$relation_name.push(awth::Pointer::new($relation_name.get(id)));
+                        });
+                )*
+            }
         }
         impl awth::Document for $name {
             fn id(&self) -> u128 {
@@ -146,6 +167,9 @@ macro_rules! collection {
             changed: bool
         }
         impl $collection {
+            pub const fn empty() -> Self {
+                Self { data: Vec::new(), changed: false }
+            }
             pub const fn new(data: Vec<$name>) -> Self {
                 Self { data, changed: false }
             }
@@ -158,7 +182,7 @@ macro_rules! collection {
             }
             pub fn update(&mut self, data: $name) {
                 if data.id == 0 { return; }
-                if let Some(d) = self.data.iter_mut().filter(|d| d.id == data.id).next() {
+                if let Some(d) = self.data.iter_mut().find(|d| d.id == data.id) {
                     *d = data;
                     self.changed = true;
                 }
@@ -178,6 +202,10 @@ macro_rules! collection {
             }
             pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, $name> {
                 self.data.iter_mut()
+            }
+            pub fn optimize(&mut self, $( $relation_name: &$relation_type, )*) -> Self {
+                self.iter_mut().for_each(|x| x.optimize($($relation_name,)*));
+                self.to_owned()
             }
         }
         impl awth::Collection for $collection {
@@ -222,6 +250,9 @@ macro_rules! collection {
             changed: bool
         }
         impl $collection {
+            pub const fn empty() -> Self {
+                Self { data: Vec::new(), changed: false }
+            }
             pub const fn new(data: Vec<$name>) -> Self {
                 Self { data, changed: false }
             }

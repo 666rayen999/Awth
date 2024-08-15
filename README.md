@@ -11,9 +11,8 @@
 - Blazingly FAST
 
 ### Goals (TODO)
-- [ ] Add Post/Get functionality (axum)
+- [X] Add Post/Get functionality (axum)
 - [ ] JWT Authentication
-- [ ] Relations between collections
 - [ ] More Optimizations (Compressing files, Faster functions: Adding, Removing, Updating, ...)
 
 ### Usage
@@ -23,15 +22,23 @@
 //            | document_name
 //            |     |
 //            v     v
-collection!(Users, User, {
+collection!(Posts, Post, {
     // id added by default
-    username: String,
-    email: String,
-    hashed_password: String,
-}, "test/users.db");
+    caption: String
+}, "test/posts.db");
 //         ^
 //         |
 //    path/file_name
+
+collection!(Users, User, {
+    username: String,
+    email: String,
+    hashed_password: String,
+}, [posts(post_ids): Posts], "test/users.db");
+//    ^    ^           ^
+//    |    |           |
+// ref vec |          type
+//      ids vec
 
 #[tokio::main]
 async fn main() {
@@ -39,7 +46,11 @@ async fn main() {
     //                     ( create empty collection if file doesnt exist )
     //                                          |
     //                                          v
-    let mut users = Users::load().await.unwrap_or_default();
+    let posts = Posts::load().await.unwrap_or_default();
+    let mut users = Users::load().await.unwrap_or_default().optimize(&posts);
+    //                                                                  ^
+    //                                                                  |
+    //                                        ptimization: add vec of refs instead of searching by id)
 
     // Add Document
     users.add(User {
