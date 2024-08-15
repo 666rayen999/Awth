@@ -1,6 +1,7 @@
 use awth::*;
-use axum::{extract::Path, response::IntoResponse, routing::get, Router};
+use axum::{response::IntoResponse, routing, Json, Router};
 use lazy_static::lazy_static;
+use serde::Deserialize;
 use std::time::Duration;
 use tokio::{net::TcpListener, sync::Mutex, time::sleep};
 
@@ -24,14 +25,14 @@ async fn main() -> Result<(), CollectionError> {
     load().await?;
 
     let app = Router::new()
-        .route("/", get(route))
-        .route("/save", get(save_now))
-        .route("/login/:email/:password", get(login))
-        .route("/register/:username/:email/:password", get(register))
-        .route("/post/:id/:caption", get(post));
+        .route("/", routing::get(route))
+        .route("/save", routing::get(save_now))
+        .route("/api/user", routing::get(login))
+        .route("/api/user", routing::post(register))
+        .route("/api/post", routing::post(post_share));
     tokio::spawn(save());
 
-    let listener = TcpListener::bind("0.0.0.0:6666").await?;
+    let listener = TcpListener::bind("0.0.0.0:3000").await?;
     axum::serve(listener, app).await?;
 
     Ok(())
@@ -73,36 +74,44 @@ async fn save_now() -> impl IntoResponse {
     }
 }
 
-async fn register(
-    Path((email, username, password)): Path<(String, String, String)>,
-) -> impl IntoResponse {
+#[derive(Deserialize)]
+struct CreateUser {
+    username: String,
+    email: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct LoginUser {
+    user: String,
+    password: String,
+}
+
+#[derive(Deserialize)]
+struct PostShare {
+    user_id: u128,
+    caption: String,
+}
+
+async fn register(Json(payload): Json<CreateUser>) {
     USERS.lock().await.add(User::new(
-        username.len() as u128,
-        username,
-        email,
-        password.len() as u128,
+        payload.username.len() as u128,
+        payload.username,
+        payload.email,
+        payload.password.len() as u128,
         &vec![],
         &POSTS.lock().await.get_ref(),
     ));
-
-    format!(
-        "{}\n",
-        USERS
-            .lock()
-            .await
-            .iter()
-            .last()
-            .map(|u| u.id)
-            .unwrap_or(404)
-    )
 }
 
-async fn login(Path((email, password)): Path<(String, String)>) -> impl IntoResponse {
+async fn login(Json(payload): Json<LoginUser>) -> impl IntoResponse {
     USERS
         .lock()
         .await
         .iter()
-        .find(|u| u.email == email && password.len() > 0)
+        .find(|u| {
+            (u.email == payload.user || u.username == payload.user) && payload.password.len() > 0
+        })
         .map(|u| {
             format!(
                 "{}: {:?}\n",
@@ -117,17 +126,17 @@ async fn login(Path((email, password)): Path<(String, String)>) -> impl IntoResp
         .unwrap_or("404\n".into())
 }
 
-async fn post(Path((id, caption)): Path<(u128, String)>) -> impl IntoResponse {
-    let id_ = id + caption.len() as u128;
-    let p = Post::new(id_, caption);
+async fn post_share(Json(payload): Json<PostShare>) -> impl IntoResponse {
+    let id = payload.user_id + payload.caption.len() as u128;
+    let p = Post::new(id, payload.caption);
     println!("adding!");
     POSTS.lock().await.add(p);
     println!("post added!");
 
-    let user = USERS.lock().await.get(id).cloned();
+    let user = USERS.lock().await.get(payload.user_id).cloned();
     if let Some(mut user) = user {
-        user.post_ids.push(id_);
-        user.posts.push(Pointer::new(POSTS.lock().await.get(id_)));
+        user.post_ids.push(id);
+        user.posts.push(Pointer::new(POSTS.lock().await.get(id)));
         USERS.lock().await.update(user);
 
         "Done!\n"

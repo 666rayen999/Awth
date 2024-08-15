@@ -12,8 +12,11 @@
 
 ### Goals (TODO)
 - [X] Add Post/Get functionality (axum)
-- [ ] JWT Authentication
+- [.] JWT Authentication
 - [ ] More Optimizations (Compressing files, Faster functions: Adding, Removing, Updating, ...)
+
+[ curl -i -X GET -H 'Content-Type: application/json' -d '{"user": "666rayen999@gmail.com", "password": "123"}' http://0.0.0.0:3000/api/user ]
+[ curl -i -X POST -H 'Content-Type: application/json' -d '{"username": "rayen", "email": "666rayen999@gmail.com", "password": "123"}' http://0.0.0.0:3000/api/user ]
 
 ### Usage
 ```rust
